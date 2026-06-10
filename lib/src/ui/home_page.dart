@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../models/cleanup_report.dart';
+import '../models/file_scan_result.dart';
 import '../services/cleanup_scheduler.dart';
 import '../services/cleanup_service.dart';
 import '../services/cleanup_settings_service.dart';
+import '../services/file_scanner_service.dart';
 
 class HomePage extends StatefulWidget {
   HomePage({
@@ -12,13 +14,16 @@ class HomePage extends StatefulWidget {
     CleanupService? cleanupService,
     CleanupSettingsService? settingsService,
     CleanupScheduler? scheduler,
+    FileScannerService? fileScannerService,
   }) : cleanupService = cleanupService ?? CleanupService(),
        settingsService = settingsService ?? CleanupSettingsService(),
-       scheduler = scheduler ?? CleanupScheduler();
+       scheduler = scheduler ?? CleanupScheduler(),
+       fileScannerService = fileScannerService ?? FileScannerService();
 
   final CleanupService cleanupService;
   final CleanupSettingsService settingsService;
   final CleanupScheduler scheduler;
+  final FileScannerService fileScannerService;
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -26,6 +31,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   CleanupReport? _report;
+  FileScanResult? _scanResult;
   CleanupSettings _settings = const CleanupSettings(
     automaticCleanupEnabled: false,
     intervalHours: 24,
@@ -45,6 +51,7 @@ class _HomePageState extends State<HomePage> {
     final settings = await widget.settingsService.load();
     final storageAccess = await widget.cleanupService.hasStorageAccess();
     final report = await widget.cleanupService.analyze();
+    final scanResult = await widget.fileScannerService.scan();
 
     if (!mounted) {
       return;
@@ -54,6 +61,7 @@ class _HomePageState extends State<HomePage> {
       _settings = settings;
       _hasStorageAccess = storageAccess;
       _report = report;
+      _scanResult = scanResult;
       _loading = false;
     });
   }
@@ -135,11 +143,16 @@ class _HomePageState extends State<HomePage> {
           children: [
             _SummaryPanel(
               loading: _loading,
-              bytes: report?.totalBytes ?? 0,
-              files: report?.totalFiles ?? 0,
+              bytes: _scanResult?.totalBytes ?? 0,
+              files: _scanResult?.totalFiles ?? 0,
               lastRunAt: _settings.lastRunAt,
               lastDeletedBytes: _settings.lastDeletedBytes,
             ),
+            const SizedBox(height: 16),
+            if (_scanResult == null)
+              const LinearProgressIndicator()
+            else
+              _FileScanPanel(result: _scanResult!),
             const SizedBox(height: 16),
             FilledButton.icon(
               onPressed: _loading || _cleaning ? null : _cleanNow,
@@ -167,9 +180,12 @@ class _HomePageState extends State<HomePage> {
               const LinearProgressIndicator()
             else
               _CleanupAreasList(candidates: report.candidates),
-            if (report?.hasErrors ?? false) ...[
+            if ((report?.hasErrors ?? false) ||
+                (_scanResult?.errors.isNotEmpty ?? false)) ...[
               const SizedBox(height: 16),
-              _ErrorsList(errors: report!.errors),
+              _ErrorsList(
+                errors: [...?report?.errors, ...?_scanResult?.errors],
+              ),
             ],
           ],
         ),
@@ -207,7 +223,7 @@ class _SummaryPanel extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Espaco recuperavel', style: theme.textTheme.titleMedium),
+            Text('Arquivos encontrados', style: theme.textTheme.titleMedium),
             const SizedBox(height: 8),
             AnimatedSwitcher(
               duration: const Duration(milliseconds: 200),
@@ -222,7 +238,7 @@ class _SummaryPanel extends StatelessWidget {
                     ),
             ),
             const SizedBox(height: 8),
-            Text('$files arquivos encontrados'),
+            Text('$files arquivos temporarios, logs ou vazios'),
             const SizedBox(height: 12),
             Text(
               lastRunAt == null
@@ -287,6 +303,110 @@ class _AutomaticCleanupPanel extends StatelessWidget {
         ),
       ],
     );
+  }
+}
+
+class _FileScanPanel extends StatelessWidget {
+  const _FileScanPanel({required this.result});
+
+  final FileScanResult result;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final items = result.items.take(30).toList(growable: false);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Scanner de arquivos', style: theme.textTheme.titleMedium),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            _MetricChip(
+              icon: Icons.description_outlined,
+              label: 'TMP',
+              value: result.temporaryFiles.toString(),
+            ),
+            _MetricChip(
+              icon: Icons.article_outlined,
+              label: 'LOG',
+              value: result.logFiles.toString(),
+            ),
+            _MetricChip(
+              icon: Icons.insert_drive_file_outlined,
+              label: 'Vazios',
+              value: result.emptyFiles.toString(),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Raizes analisadas: ${result.roots.length}',
+          style: theme.textTheme.bodySmall,
+        ),
+        const SizedBox(height: 8),
+        if (result.items.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 16),
+            child: Text('Nenhum arquivo .tmp, .log ou vazio encontrado.'),
+          )
+        else
+          DecoratedBox(
+            decoration: BoxDecoration(
+              border: Border.all(color: theme.colorScheme.outlineVariant),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Column(
+              children: [
+                for (final item in items)
+                  ListTile(
+                    dense: true,
+                    leading: const Icon(Icons.description_outlined),
+                    title: Text(
+                      item.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    subtitle: Text(
+                      '${item.reasons.map((reason) => reason.label).join(', ')}\n${item.path}',
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    trailing: Text(_formatBytes(item.bytes)),
+                  ),
+                if (result.items.length > items.length)
+                  Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Text(
+                      'Mais ${result.items.length - items.length} arquivos encontrados.',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _MetricChip extends StatelessWidget {
+  const _MetricChip({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Chip(avatar: Icon(icon, size: 18), label: Text('$label: $value'));
   }
 }
 

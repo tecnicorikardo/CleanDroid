@@ -1,9 +1,11 @@
 import 'dart:io';
 
 import 'package:cleandroid/src/models/cleanup_report.dart';
+import 'package:cleandroid/src/models/file_scan_result.dart';
 import 'package:cleandroid/src/services/cleanup_scheduler.dart';
 import 'package:cleandroid/src/services/cleanup_service.dart';
 import 'package:cleandroid/src/services/cleanup_settings_service.dart';
+import 'package:cleandroid/src/services/file_scanner_service.dart';
 import 'package:cleandroid/src/ui/home_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -16,6 +18,7 @@ void main() {
           cleanupService: _FakeCleanupService(),
           settingsService: _FakeSettingsService(),
           scheduler: _FakeScheduler(),
+          fileScannerService: _FakeFileScannerService(),
         ),
       ),
     );
@@ -23,9 +26,38 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('CleanDroid'), findsOneWidget);
-    expect(find.text('Espaco recuperavel'), findsOneWidget);
+    expect(find.text('Arquivos encontrados'), findsOneWidget);
+    expect(find.text('Scanner de arquivos'), findsOneWidget);
     expect(find.text('Limpar agora'), findsOneWidget);
     expect(find.text('Limpeza automatica de cache'), findsOneWidget);
+  });
+
+  test('scanner localiza arquivos tmp, log e vazios reais', () async {
+    final root = await Directory.systemTemp.createTemp('cleandroid_scan_test');
+    addTearDown(() => root.delete(recursive: true));
+
+    await File(
+      '${root.path}${Platform.pathSeparator}cache.tmp',
+    ).writeAsString('abc');
+    await File(
+      '${root.path}${Platform.pathSeparator}system.log',
+    ).writeAsString('log');
+    await File('${root.path}${Platform.pathSeparator}empty.txt').create();
+    await File(
+      '${root.path}${Platform.pathSeparator}photo.jpg',
+    ).writeAsString('image');
+
+    final result = await FileScannerService(
+      rootsProvider: () async => [root],
+      now: () => DateTime(2026, 6, 10),
+    ).scan();
+
+    expect(result.totalFiles, 3);
+    expect(result.temporaryFiles, 1);
+    expect(result.logFiles, 1);
+    expect(result.emptyFiles, 1);
+    expect(result.items.map((item) => item.name), isNot(contains('photo.jpg')));
+    expect(result.totalBytes, 6);
   });
 }
 
@@ -106,4 +138,26 @@ class _FakeScheduler implements CleanupScheduler {
 
   @override
   Future<void> initialize() async {}
+}
+
+class _FakeFileScannerService extends FileScannerService {
+  @override
+  Future<FileScanResult> scan() async {
+    final now = DateTime(2026, 6, 10, 10);
+    return FileScanResult(
+      startedAt: now,
+      finishedAt: now,
+      roots: [Directory.systemTemp.path],
+      items: [
+        FileScanItem(
+          path:
+              '${Directory.systemTemp.path}${Platform.pathSeparator}cache.tmp',
+          bytes: 1024,
+          modifiedAt: now,
+          reasons: const {FileScanReason.temporaryExtension},
+        ),
+      ],
+      errors: const [],
+    );
+  }
 }
