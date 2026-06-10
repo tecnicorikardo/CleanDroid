@@ -7,6 +7,7 @@ import '../services/cleanup_scheduler.dart';
 import '../services/cleanup_service.dart';
 import '../services/cleanup_settings_service.dart';
 import '../services/file_scanner_service.dart';
+import 'permissions_page.dart';
 
 class HomePage extends StatefulWidget {
   HomePage({
@@ -97,6 +98,13 @@ class _HomePageState extends State<HomePage> {
     await _load();
   }
 
+  Future<void> _openPermissionsPage() async {
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => PermissionsPage()));
+    await _load();
+  }
+
   Future<void> _setAutomaticCleanup(bool enabled) async {
     final next = _settings.copyWith(automaticCleanupEnabled: enabled);
     await widget.settingsService.save(next);
@@ -129,6 +137,11 @@ class _HomePageState extends State<HomePage> {
       appBar: AppBar(
         title: const Text('CleanDroid'),
         actions: [
+          IconButton(
+            tooltip: 'Permissoes necessarias',
+            onPressed: _openPermissionsPage,
+            icon: const Icon(Icons.admin_panel_settings_outlined),
+          ),
           IconButton(
             tooltip: 'Atualizar analise',
             onPressed: _loading ? null : _load,
@@ -174,6 +187,7 @@ class _HomePageState extends State<HomePage> {
             _StorageAccessPanel(
               hasStorageAccess: _hasStorageAccess,
               onRequestAccess: _requestStorageAccess,
+              onOpenPermissions: _openPermissionsPage,
             ),
             const SizedBox(height: 16),
             if (report == null)
@@ -414,10 +428,12 @@ class _StorageAccessPanel extends StatelessWidget {
   const _StorageAccessPanel({
     required this.hasStorageAccess,
     required this.onRequestAccess,
+    required this.onOpenPermissions,
   });
 
   final bool hasStorageAccess;
   final VoidCallback onRequestAccess;
+  final VoidCallback onOpenPermissions;
 
   @override
   Widget build(BuildContext context) {
@@ -447,6 +463,11 @@ class _StorageAccessPanel extends StatelessWidget {
             TextButton(
               onPressed: hasStorageAccess ? null : onRequestAccess,
               child: const Text('Permitir'),
+            ),
+            IconButton(
+              tooltip: 'Ver permissoes',
+              onPressed: onOpenPermissions,
+              icon: const Icon(Icons.chevron_right),
             ),
           ],
         ),

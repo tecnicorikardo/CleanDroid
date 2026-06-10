@@ -1,12 +1,15 @@
 import 'dart:io';
 
 import 'package:cleandroid/src/models/cleanup_report.dart';
+import 'package:cleandroid/src/models/app_permission_status.dart';
 import 'package:cleandroid/src/models/file_scan_result.dart';
+import 'package:cleandroid/src/services/app_permission_service.dart';
 import 'package:cleandroid/src/services/cleanup_scheduler.dart';
 import 'package:cleandroid/src/services/cleanup_service.dart';
 import 'package:cleandroid/src/services/cleanup_settings_service.dart';
 import 'package:cleandroid/src/services/file_scanner_service.dart';
 import 'package:cleandroid/src/ui/home_page.dart';
+import 'package:cleandroid/src/ui/permissions_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -58,6 +61,23 @@ void main() {
     expect(result.emptyFiles, 1);
     expect(result.items.map((item) => item.name), isNot(contains('photo.jpg')));
     expect(result.totalBytes, 6);
+  });
+
+  testWidgets('tela de permissoes mostra status especiais', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PermissionsPage(permissionService: _FakeAppPermissionService()),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+
+    expect(find.text('Permissoes necessarias'), findsOneWidget);
+    expect(find.text('Acesso a todos os arquivos'), findsOneWidget);
+    expect(find.text('Acesso ao uso'), findsOneWidget);
+    expect(find.text('Consultar aplicativos instalados'), findsOneWidget);
+    expect(find.text('Permitida'), findsNWidgets(2));
+    expect(find.text('Nao permitida'), findsOneWidget);
   });
 }
 
@@ -160,4 +180,24 @@ class _FakeFileScannerService extends FileScannerService {
       errors: const [],
     );
   }
+}
+
+class _FakeAppPermissionService extends AppPermissionService {
+  @override
+  Future<AppPermissionStatus> loadStatus() async {
+    return const AppPermissionStatus(
+      allFilesAccess: false,
+      usageAccess: true,
+      queryAllPackagesDeclared: true,
+    );
+  }
+
+  @override
+  Future<void> openAllFilesAccessSettings() async {}
+
+  @override
+  Future<void> openUsageAccessSettings() async {}
+
+  @override
+  Future<void> openAppDetailsSettings() async {}
 }
